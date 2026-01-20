@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>内部告発 - Mobile Tactical Edition</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<style>
+    @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+    body { background: #000; color: #0f0; font-family: 'Press Start 2P', cursive; margin: 0; padding: 0; overflow: hidden; touch-action: none; display: flex; justify-content: center; align-items: flex-start; height: 100vh; }
+    
+    /* 画面スケーリング用コンテナ */
+    #game-wrapper { position: relative; width: 900px; height: 650px; transform-origin: top center; background: #000; border: 2px solid #0f0; box-sizing: border-box; }
+    .screen { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+    .hidden { display: none !important; }
+    
+    /* UIパーツ */
+    .header { width: 100%; height: 60px; display: flex; justify-content: space-around; align-items: center; background: #111; border-bottom: 2px solid #0f0; font-size: 10px; }
+    .stat-val { color: #fff; font-size: 14px; }
+    .btn { background: #111; color: #0f0; border: 2px solid #0f0; padding: 15px; margin: 10px; font-family: inherit; width: 300px; cursor: pointer; }
+    .rank-box { font-size: 9px; color: #888; width: 80%; line-height: 1.5; margin-bottom: 10px; }
+    .rank-row { display: flex; justify-content: space-between; border-bottom: 1px solid #222; }
+
+    canvas { background: #050505; display: block; }
+
+    /* モバイル操作パネル */
+    #mobile-ui { position: absolute; bottom: 10px; width: 100%; display: flex; justify-content: space-between; padding: 0 40px; box-sizing: border-box; pointer-events: none; }
+    .ctrl-group { display: grid; grid-template-columns: repeat(3, 70px); grid-template-rows: repeat(3, 70px); gap: 5px; pointer-events: auto; }
+    .touch-btn { background: rgba(0, 255, 0, 0.15); border: 2px solid #0f0; color: #0f0; display: flex; align-items: center; justify-content: center; font-size: 24px; user-select: none; border-radius: 10px; }
+    .touch-btn:active { background: rgba(0, 255, 0, 0.4); }
+    .action-circle { width: 100px; height: 100px; border-radius: 50%; background: rgba(255, 255, 0, 0.15); border: 2px solid #ff0; color: #ff0; display: flex; align-items: center; justify-content: center; font-size: 14px; pointer-events: auto; user-select: none; }
+    .action-circle:active { background: rgba(255, 255, 0, 0.4); }
+</style>
+</head>
+<body>
+
+<div id="game-wrapper">
+    <div id="screen-title" class="screen">
+        <h1>INTERNAL<br>WHISTLEBLOWER</h1>
+        <div style="font-size:10px; margin-bottom:20px;">エージェント: <span id="my-name" style="color:#fff;"></span></div>
+        <div id="mission-list"></div>
+    </div>
+
+    <div id="screen-ready" class="screen hidden">
+        <h2 id="ready-mission-name">MISSION</h2>
+        <div id="mission-ranking" class="rank-box"></div>
+        <button class="btn" onclick="startGame()">ミッション開始</button>
+        <button class="btn" style="width:150px; font-size:10px;" onclick="showScreen('title')">戻る</button>
+    </div>
+
+    <div id="screen-game" class="screen hidden" style="justify-content: flex-start;">
+        <div class="header">
+            <div>📁 <span id="ev-val" class="stat-val">0/0</span></div>
+            <div>🧠 <span id="mtl-val" class="stat-val">100</span></div>
+            <div id="item-slot" style="color:#ff0; font-size:10px;">ITEM: -</div>
+            <div>⏱️ <span id="time-val" class="stat-val">0.0</span></div>
+        </div>
+        <canvas id="gameCanvas" width="900" height="420"></canvas>
+        <div id="mobile-ui">
+            <div class="ctrl-group">
+                <div class="touch-btn" style="grid-column:2" onpointerdown="keys.Up=true" onpointerup="keys.Up=false" onpointerleave="keys.Up=false">▲</div>
+                <div class="touch-btn" style="grid-column:1; grid-row:2" onpointerdown="keys.Left=true" onpointerup="keys.Left=false" onpointerleave="keys.Left=false">◀</div>
+                <div class="touch-btn" style="grid-column:3; grid-row:2" onpointerdown="keys.Right=true" onpointerup="keys.Right=false" onpointerleave="keys.Right=false">▶</div>
+                <div class="touch-btn" style="grid-column:2; grid-row:3" onpointerdown="keys.Down=true" onpointerup="keys.Down=false" onpointerleave="keys.Down=false">▼</div>
+            </div>
+            <div style="display:flex; align-items:center;">
+                <div class="action-circle" onpointerdown="useItem()">ITEM</div>
+            </div>
+        </div>
+    </div>
+
+    <div id="screen-result" class="screen hidden">
+        <h2 id="result-title">RESULT</h2>
+        <p id="result-text"></p>
+        <div id="final-ranking" class="rank-box"></div>
+        <button class="btn" onclick="showScreen('title')">タイトルへ</button>
+    </div>
+</div>
+
+<script>
+const canvas = document.getElementById("gameCanvas");
+const ctx = canvas.getContext("2d");
+let keys = { Up: false, Down: false, Left: false, Right: false };
+
+// --- 自動ネーム生成 ---
+const adj = ["静かな", "伝説の", "不屈の", "謎の", "影の", "燃える"];
+const job = ["係長", "ハッカー", "スパイ", "事務員", "記者", "通報者"];
+let myCodename = sessionStorage.getItem('name') || (adj[Math.floor(Math.random()*adj.length)] + job[Math.floor(Math.random()*job.length)]);
+sessionStorage.setItem('name', myCodename);
+document.getElementById('my-name').textContent = myCodename;
+
+// --- ステージデータ ---
+const missions = [
+    { id: "m1", title: "MISSION 1: 営業部潜入", floors: [
+        { target: 3, bosses: [{t:'課長', n:2, s:3, p:0.5, sz:30}], walls: [{x:350,y:0,w:50,h:300}] },
+        { target: 4, bosses: [{t:'部長', n:1, s:4, p:0.8, sz:40}], walls: [{x:200,y:150,w:40,h:300}, {x:600,y:0,w:40,h:250}] }
+    ]},
+    { id: "m2", title: "MISSION 2: 社長室突破", floors: [
+        { target: 3, bosses: [{t:'部長', n:2, s:3.5, p:1.0, sz:40}], walls: [{x:100,y:100,w:700,h:40}] },
+        { target: 1, bosses: [{t:'社長', n:1, s:5.5, p:5.0, sz:65}], walls: [{x:430,y:100,w:40,h:220}] }
+    ]}
+];
+
+let selectedM = null, currentFloor = 0, gameActive = false, totalTime = 0, frameStartTime = 0;
+let player = { x: 50, y: 200, w: 30, h: 30, speed: 6, item: null }, mental = 100, evidence = [], bosses = [], walls = [], items = [], sleepTimer = 0;
+
+// --- スケーリング ---
+function resize() {
+    const wrap = document.getElementById('game-wrapper');
+    const scale = Math.min(window.innerWidth / 900, window.innerHeight / 650);
+    wrap.style.transform = `scale(${scale})`;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// --- 画面切り替え ---
+function showScreen(s) {
+    document.querySelectorAll('.screen').forEach(x => x.classList.add('hidden'));
+    document.getElementById('screen-' + s).classList.remove('hidden');
+    if(s === 'title') renderMissions();
+}
+
+function renderMissions() {
+    const list = document.getElementById('mission-list');
+    list.innerHTML = "";
+    missions.forEach(m => {
+        const b = document.createElement('button');
+        b.className = 'btn';
+        b.textContent = m.title;
+        b.onclick = () => {
+            selectedM = m; currentFloor = 0; totalTime = 0;
+            document.getElementById('ready-mission-name').textContent = m.title;
+            displayRanking(m.id, 'mission-ranking');
+            showScreen('ready');
+        };
+        list.appendChild(b);
+    });
+}
+
+function startGame() { showScreen('game'); initFloor(); }
+
+function initFloor() {
+    const f = selectedM.floors[currentFloor];
+    gameActive = true; player.x = 40; player.y = 200; mental = 100; sleepTimer = 0;
+    walls = JSON.parse(JSON.stringify(f.walls));
+    evidence = Array.from({length: f.target}, () => ({ x: 200+Math.random()*600, y: 50+Math.random()*300, active: true }));
+    items = [{ x: 300+Math.random()*300, y: 150+Math.random()*150, type: Math.random()>0.5?'🔨':'🌬️', active: true }];
+    bosses = f.bosses.flatMap(b => Array.from({length: b.n}, () => ({
+        t: b.t, x: 750, y: Math.random()*300, sy: b.s, sz: b.sz, p: b.p, found: false
+    })));
+    frameStartTime = Date.now();
+    requestAnimationFrame(loop);
+}
+
+function useItem() {
+    if(!player.item) return;
+    if(player.item === '🔨') walls = []; 
+    else sleepTimer = 300;
+    player.item = null;
+    document.getElementById('item-slot').textContent = "ITEM: -";
+}
+
+function loop() {
+    if(!gameActive) return;
+    const now = Date.now();
+    const dt = (now - frameStartTime) / 1000;
+    frameStartTime = now;
+    totalTime += dt;
+    if(sleepTimer > 0) sleepTimer--;
+
+    // 移動
+    let nx = player.x, ny = player.y;
+    if(keys.Up) ny -= player.speed; if(keys.Down) ny += player.speed;
+    if(keys.Left) nx -= player.speed; if(keys.Right) nx += player.speed;
+    
+    nx = Math.max(0, Math.min(870, nx)); ny = Math.max(0, Math.min(390, ny));
+    if(!walls.some(w => nx < w.x+w.w && nx+player.w > w.x && player.y < w.y+w.h && player.y+player.h > w.y)) player.x = nx;
+    if(!walls.some(w => player.x < w.x+w.w && player.x+player.w > w.x && ny < w.y+w.h && ny+player.h > w.y)) player.y = ny;
+
+    // ボスAI
+    if(sleepTimer <= 0) {
+        bosses.forEach(b => {
+            if(b.t === '社長') {
+                let dist = Math.hypot(player.x-b.x, player.y-b.y);
+                if(dist < 300) { b.found = true; b.x += (player.x-b.x)/dist*b.sy; b.y += (player.y-b.y)/dist*b.sy; }
+                else { b.found = false; b.y += b.sy; if(b.y<0 || b.y>420-b.sz) b.sy*=-1; }
+            } else {
+                b.y += b.sy; if(b.y<0 || b.y>420-b.sz) b.sy*=-1;
+            }
+            if(Math.hypot(player.x-b.x, player.y-b.y) < b.sz) mental -= b.p;
+        });
+    }
+
+    // 収集
+    evidence.forEach(e => { if(e.active && Math.hypot(player.x-e.x, player.y-e.y)<30) e.active = false; });
+    items.forEach(i => { if(i.active && Math.hypot(player.x-i.x, player.y-i.y)<30) { i.active = false; player.item = i.type; document.getElementById('item-slot').textContent = "ITEM: " + i.type; }});
+
+    // UI更新
+    document.getElementById('time-val').textContent = totalTime.toFixed(1);
+    document.getElementById('mtl-val').textContent = Math.max(0, Math.floor(mental));
+    document.getElementById('ev-val').textContent = `${evidence.filter(e=>!e.active).length}/${evidence.length}`;
+
+    // クリア判定
+    if(player.x > 860 && evidence.every(e=>!e.active)) {
+        if(currentFloor < selectedM.floors.length - 1) { currentFloor++; initFloor(); return; }
+        else { finish(true); return; }
+    }
+    if(mental <= 0) { finish(false); return; }
+
+    draw();
+    requestAnimationFrame(loop);
+}
+
+function draw() {
+    ctx.clearRect(0,0,900,420);
+    walls.forEach(w => { ctx.fillStyle="#444"; ctx.fillRect(w.x,w.y,w.w,w.h); });
+    evidence.forEach(e => { if(e.active) { ctx.fillStyle="#ff0"; ctx.fillRect(e.x,e.y,20,20); }});
+    items.forEach(i => { if(i.active) { ctx.fillStyle="#0af"; ctx.fillRect(i.x,i.y,25,25); ctx.fillStyle="#fff"; ctx.fillText(i.type, i.x+2, i.y+18); }});
+    bosses.forEach(b => {
+        ctx.fillStyle = sleepTimer > 0 ? "#44f" : (b.t==='社長'?"#f00":"#f0f");
+        ctx.fillRect(b.x,b.y,b.sz,b.sz);
+        if(b.found && sleepTimer<=0) { ctx.fillStyle="#f00"; ctx.font="20px Arial"; ctx.fillText("!", b.x+b.sz/2-5, b.y-5); }
+    });
+    ctx.fillStyle="#0f0"; ctx.fillRect(player.x,player.y,player.w,player.h);
+    ctx.fillStyle = evidence.every(e=>!e.active) ? "#0f0" : "#222"; ctx.fillRect(880,0,20,420);
+}
+
+function finish(clear) {
+    gameActive = false;
+    showScreen('result');
+    if(clear) {
+        document.getElementById('result-title').textContent = "成功!";
+        document.getElementById('result-text').textContent = `タイム: ${totalTime.toFixed(2)}秒`;
+        saveRanking(selectedM.id, totalTime, myCodename);
+    } else {
+        document.getElementById('result-title').textContent = "失敗...";
+        document.getElementById('result-text').textContent = "身元が特定されました。";
+    }
+    displayRanking(selectedM.id, 'final-ranking');
+}
+
+// --- ランキング ---
+function saveRanking(id, time, name) {
+    let s = JSON.parse(localStorage.getItem('rank_'+id)||'[]');
+    s.push({name, time}); s.sort((a,b)=>a.time-b.time);
+    localStorage.setItem('rank_'+id, JSON.stringify(s.slice(0,5)));
+}
+function displayRanking(id, elId) {
+    let s = JSON.parse(localStorage.getItem('rank_'+id)||'[]');
+    document.getElementById(elId).innerHTML = "TOP AGENTS:<br>" + s.map((x,i)=>`<div class="rank-row"><span>${i+1}.${x.name}</span><span>${x.time.toFixed(1)}s</span></div>`).join("");
+}
+
+showScreen('title');
+</script>
+</body>
+</html>
